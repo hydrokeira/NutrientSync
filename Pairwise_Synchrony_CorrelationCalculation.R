@@ -62,11 +62,39 @@ chem_norm<-chem %>%
   mutate(norm_conc=scale(FNConc_mgL))
 
 chem_avg<-chem_norm %>%
+  dplyr::group_by(Stream_Name, chemical, Month, Year) %>%
+  dplyr::summarise(mean_conc=mean(norm_conc, na.rm=T))
+
+chem_avg<-chem_norm %>%
   group_by(Stream_Name, chemical, Month) %>%
   summarise(mean_conc=mean(norm_conc, na.rm=T))
 
 chem_wide<-chem_avg %>%
   pivot_wider(names_from = Month, values_from = mean_conc)
+
+chem_class <- chem_wide %>%
+  select(Stream_Name, chemical) %>%
+  group_by(Stream_Name) %>%
+  summarise(
+    chem_incl = paste(chemical, collapse = ", "),
+    .groups = "drop"
+  )
+
+QLog<-read.csv("Site_Reference_Table_02022026.csv")
+
+#extract columns you need
+QLog<-QLog[,c("Stream_Name", "Latitude", "Longitude")]
+
+chem_class<-left_join(chem_class, QLog)
+
+chem_class$chem_incl<-factor(chem_class$chem_incl, 
+                             levels = c("DSi, N, P", "DSi, N", "DSi, P", "N, P"))
+
+ggplot(chem_class, aes(chem_incl))+geom_bar(stat = "count", fill="black")+
+  theme_classic()+theme(text = element_text(size = 20))+
+  labs(x="", y="Number of Sites")
+
+write.csv(chem_class, "Chem_Class_LatLong.csv")
 
 cluster_si<-chem_wide %>%
   filter(chemical=="DSi")
@@ -87,7 +115,7 @@ Si_N_data <- chem_avg %>%
   mutate(num_chem=n_distinct(chemical)) %>%
   filter(num_chem==2)
 
-Si_N_sites<-unique(Si_N_sites$Stream_Name)
+Si_N_sites<-unique(Si_N_data$Stream_Name)
 
 #pdf("ASI_DSi_N_plots_CORRsynchrony.pdf", width = 10, height = 6)
 
@@ -134,7 +162,8 @@ for (i in 1:length(Si_N_sites)) {
 
 #dev.off()
 
-results_Si_N$shift<-ifelse(results_Si_N$corr.best_shift <=6, results_Si_N$corr.best_shift, abs(12-results_Si_N$corr.best_shift))
+results_Si_N$shift<-ifelse(results_Si_N$corr.best_shift <=6, 
+                           results_Si_N$corr.best_shift, abs(12-results_Si_N$corr.best_shift))
 
 # Create a regular 0–1 grid
 grid <- expand.grid(
@@ -184,12 +213,6 @@ p1<-ggplot(results_Si_N, aes(shift, corr.synchrony))+
 
 p1
 
-p4<-ggplot(results_Si_N, aes(shift))+
-  geom_bar(fill="blue")+
-  theme_classic()+theme(text = element_text(size = 20))+
-  labs(x="Shift (Months)", y="Number of Sites")
-p4
-
 results_Si_N<-results_Si_N %>%
   mutate(shift_class = case_when(
     shift==0 ~ "in phase",
@@ -197,26 +220,11 @@ results_Si_N<-results_Si_N %>%
     .default = "offset"
   ),
   sync_class = case_when(
-    corr.synchrony >=0.8~"synchronous",
+    corr.synchrony >=0.5~"synchronous",
     .default = "asynchronous"
   ),
   sync_shift=paste0(sync_class, ", ", shift_class)
   )
-
-prop_table_Si_N <- results_Si_N %>%
-  count(sync_class, shift_class) %>%
-  mutate(prop = n / sum(n))
-
-p4<-ggplot(prop_table_Si_N, aes(y = sync_class, x = shift_class, fill = prop)) +
-  geom_tile(color = "white", alpha=0.8) +
-  geom_text(aes(label = scales::percent(prop, accuracy = .1)), color = "black", size = 5) +
-  scale_fill_viridis_c(option = "plasma", name = "Proportion", limits=c(0,0.5)) +
-  theme_minimal(base_size = 18) +
-  theme(legend.position = "null")+
-  labs(x = "", y = "")
-
-p4
-
 
 #### now for Si - P pairs ####
 
@@ -319,12 +327,6 @@ p2<-ggplot(results_Si_P, aes(shift, corr.synchrony))+
 
 p2
 
-p5<-ggplot(results_Si_P, aes(shift))+
-  geom_bar(fill="blue")+
-  theme_classic()+theme(text = element_text(size = 20))+
-  labs(x="Shift (Months)", y="Number of Sites")
-p5
-
 results_Si_P<-results_Si_P %>%
   mutate(shift_class = case_when(
     shift==0 ~ "in phase",
@@ -332,25 +334,11 @@ results_Si_P<-results_Si_P %>%
     .default = "offset"
   ),
   sync_class = case_when(
-    corr.synchrony >=0.85~"synchronous",
+    corr.synchrony >=0.5~"synchronous",
     .default = "asynchronous"
   ),
   sync_shift=paste0(sync_class, ", ", shift_class)
   )
-
-prop_table_Si_P <- results_Si_P %>%
-  count(sync_class, shift_class) %>%
-  mutate(prop = n / sum(n))
-
-p5<-ggplot(prop_table_Si_P, aes(y = sync_class, x = shift_class, fill = prop)) +
-  geom_tile(color = "white", alpha=0.8) +
-  geom_text(aes(label = scales::percent(prop, accuracy = .1)), color = "black", size = 5) +
-  scale_fill_viridis_c(option = "plasma", name = "Proportion", limits=c(0,0.5)) +
-  theme_minimal(base_size = 18) +
-  theme(legend.position = "null", axis.text.y = element_blank())+
-  labs(x = "", y = "")
-
-p5
 
 #### now for N - P pairs ####
 
@@ -462,34 +450,11 @@ ggplot() +
 
 dev.off()
 
-pdf("Corr_Amp_Synchrony.pdf", width = 15, height = 6)
+pdf("Corr_Amp_Synchrony_UpdatedFeb2026.pdf", width = 15, height = 6)
 
 ggarrange(z1, z2, z3, nrow = 1, widths = c(0.4, 0.4, 0.54))
 
 dev.off()
-
-p3<-ggplot(results_N_P, aes(shift, corr.synchrony))+
-  geom_hline(yintercept = mean(results_N_P$corr.synchrony), col="red")+
-  #geom_hline(yintercept = 0.85, col="grey")+
-  #geom_vline(xintercept = .5, col="grey")+geom_vline(xintercept = 5.5, col="grey")+
-  geom_boxplot(aes(group=shift), fill=NA)+geom_jitter()+
-  theme_classic()+theme(text = element_text(size = 20))+
-  labs(x="Shift (Months)", y="")+ggtitle("N-P")
-p3
-
-results_N_P %>%
-  mutate(sync_char=ifelse(corr.synchrony < 0.5, "asynchronous", "synchronous")) %>%
-  ggplot(aes(x=1))+geom_bar(aes(fill=sync_char))+theme_classic()+labs(x="", y="Number of Sites")+
-  theme(text = element_text(size = 20))+ggtitle("N-P")
-
-p6<-ggplot(results_N_P, aes(shift))+
-  geom_bar(fill="blue")+
-  theme_classic()+theme(text = element_text(size = 20))+
-  labs(x="Shift (Months)", y="Number of Sites")
-p6
-
-
-ggarrange(p1, p2, p3, p4, p5, p6, nrow=2, ncol = 3, align = "hv")
 
 results_N_P<-results_N_P %>%
   mutate(shift_class = case_when(
@@ -498,67 +463,12 @@ results_N_P<-results_N_P %>%
     .default = "offset"
   ),
   sync_class = case_when(
-    1-ASI.JS_min >=0.85~"synchronous",
+    corr.synchrony >=0.5~"synchronous",
     .default = "asynchronous"
   ),
   sync_shift=paste0(sync_class, ", ", shift_class)
   )
 
-prop_table_N_P <- results_N_P %>%
-  count(sync_class, shift_class) %>%
-  mutate(prop = n / sum(n))
-
-p6<-ggplot(prop_table_N_P, aes(y = sync_class, x = shift_class, fill = prop)) +
-  geom_tile(color = "white", alpha=0.8) +
-  geom_text(aes(label = scales::percent(prop, accuracy = .1)), color = "black", size = 5) +
-  scale_fill_viridis_c(option = "plasma", name = "Proportion", limits=c(0,0.5)) +
-  theme_minimal(base_size = 18) +
-  theme(legend.position = "null", axis.text.y = element_blank())+
-  labs(x = "", y = "")
-
-p6
-
 results_all<-bind_rows(results_Si_N, results_Si_P, results_N_P)
-
-plot_a<-results_all %>%
-  mutate(solute_pair=paste0(Solute1, "-", Solute2)) %>%
-  ggplot(aes(solute_pair, corr.synchrony))+
-  geom_hline(yintercept = 0.5, col="red")+
-  geom_boxplot(fill=NA)+geom_jitter(size=0.5)+
-  theme_classic()+labs(x="", y="Synchrony")+
-  theme(text = element_text(size = 20))
-
-plot_a
-
-plot_b<-results_all %>%
-  mutate(solute_pair=paste0(Solute1, "-", Solute2)) %>%
-  mutate(sync_char=ifelse(corr.synchrony < 0.5, "asynchronous", "synchronous")) %>%
-  ggplot(aes(solute_pair))+geom_bar(aes(fill=sync_char), position = "fill")+
-  theme_classic()+labs(x="", y="Proportion of Sites", fill="")+
-  scale_fill_manual(values = c("grey", "blue"))+
-  theme(text = element_text(size = 20), legend.position = "top")
-
-plot_b
-
-plot_c<-results_all %>%
-  mutate(solute_pair=paste0(Solute1, "-", Solute2)) %>%
-  mutate(sync_char=ifelse(corr.synchrony < 0.5, "asynchronous", "synchronous")) %>%
-  filter(sync_char=="synchronous") %>%
-  ggplot(aes(shift))+geom_bar(fill="blue")+
-  theme_classic()+labs(x="Shift (Months)", y="Number of Sites", fill="")+
-  ggtitle("Distribution of Phase Offset for Synchronous Sites")+
-  scale_x_continuous(labels = seq(0,6,1), breaks = seq(0,6,1))+
-  theme(text = element_text(size = 20))+
-  facet_wrap(~solute_pair)
-
-plot_c
-
-set1<-ggarrange(plot_a, plot_b)
-
-pdf("Synchrony_ThreePanel_Plot.pdf", width = 10, height = 10)
-
-ggarrange(set1, plot_c, nrow = 2, heights = c(0.5, 0.7))
-
-dev.off()
 
 write.csv(results_all, "Synchrony_Shift_AllSolutePairs.csv")
